@@ -9,8 +9,11 @@ export default function App() {
   const [audioUrl, setAudioUrl] = useState(null);
   const [audioFile, setAudioFile] = useState(null);
   const [sentences, setSentences] = useState([]);
+  const [summary, setSummary] = useState([]);
   const [status, setStatus] = useState('');
+  const [summaryStatus, setSummaryStatus] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
 
   // 1. M4A 파일 업로드 및 오디오 플레이어 연결
   const handleFileUpload = (e) => {
@@ -24,7 +27,9 @@ export default function App() {
     setAudioFile(file);
     setAudioUrl(URL.createObjectURL(file));
     setSentences([]);
+    setSummary([]);
     setStatus('파일이 준비되었습니다.');
+    setSummaryStatus('');
   };
 
   // 2. M4A 파일을 Whisper 입력 규격(16,000Hz Float32Array)으로 디코딩
@@ -43,6 +48,8 @@ export default function App() {
 
     setIsProcessing(true);
     setSentences([]);
+    setSummary([]);
+    setSummaryStatus('');
 
     try {
       setStatus('Whisper 로컬 모델 로딩 중... (최초 1회 다운로드 후 캐시됨)');
@@ -58,14 +65,16 @@ export default function App() {
       const output = await transcriber(audioData, {
         chunk_length_s: 30,
         stride_length_s: 5,
-        return_timestamps: true, // 문장(구간) 단위로 분리
+        return_timestamps: true,
       });
 
-      // 추출된 구간(chunks)이나 전체 텍스트를 한 문장씩 배열로 분리
+      // 전체 텍스트를 마침표/물음표/느낌표 기준의 문장 단위로 분리
+      const fullText = output.text.trim();
       const extractedSentences =
-        output.chunks && output.chunks.length > 0
+        fullText.match(/[^.!?]+[.!?]+/g)?.map((s) => s.trim()) ||
+        (output.chunks && output.chunks.length > 0
           ? output.chunks.map((c) => c.text.trim()).filter(Boolean)
-          : output.text.match(/[^.!?]+[.!?]+/g)?.map((s) => s.trim()) || [output.text];
+          : [fullText]);
 
       setSentences(extractedSentences);
       setStatus('완료');
@@ -77,9 +86,48 @@ export default function App() {
     }
   };
 
+  // 4. 로컬 DistilBART 모델(Xenova/distilbart-cnn-6-6)로 3문장 이내 생성형 요약
+  const handleSummarize = async () => {
+    if (sentences.length === 0 || isSummarizing) return;
+
+    setIsSummarizing(true);
+    setSummary([]);
+
+    try {
+      setSummaryStatus('요약 AI 모델(DistilBART) 로딩 중... (최초 1회 다운로드 후 캐시됨)');
+      const summarizer = await pipeline(
+        'summarization',
+        'Xenova/distilbart-cnn-6-6'
+      );
+
+      setSummaryStatus('스크립트 요약 생성 중...');
+      const fullText = sentences.join(' ');
+
+      const result = await summarizer(fullText, {
+        max_new_tokens: 100, // 3문장 내외 길이에 맞춰 토큰 제한
+        min_length: 20,
+      });
+
+      const summaryText = result[0]?.summary_text?.trim() || '';
+
+      // 생성된 요약문을 문장 단위로 분리한 뒤 최대 3문장까지만 유지
+      const summarySentences = (
+        summaryText.match(/[^.!?]+[.!?]+/g)?.map((s) => s.trim()) || [summaryText]
+      ).slice(0, 3);
+
+      setSummary(summarySentences);
+      setSummaryStatus('요약 완료');
+    } catch (error) {
+      console.error(error);
+      setSummaryStatus(`요약 오류 발생: ${error.message}`);
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
   return (
     <div style={{ maxWidth: '600px', margin: '40px auto', padding: '20px', fontFamily: 'sans-serif' }}>
-      <h2>M4A 오디오 파일 영어 스크립트 추출 앱</h2>
+      <h2>M4A 플레이어 & 영문 스크립트 추출</h2>
 
       {/* 파일 업로드 */}
       <div style={{ marginBottom: '20px' }}>
@@ -115,7 +163,7 @@ export default function App() {
 
       {/* 영문 스크립트 한 문장씩 출력 */}
       {sentences.length > 0 && (
-        <div style={{ border: '1px solid #ccc', borderRadius: '6px', padding: '15px' }}>
+        <div style={{ border: '1px solid #ccc', borderRadius: '6px', padding: '15px', marginBottom: '20px' }}>
           {sentences.map((sentence, index) => (
             <div
               key={index}
@@ -130,6 +178,51 @@ export default function App() {
               {sentence}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 하단부 내용 요약하기 버튼 및 DistilBART 3문장 요약 결과 */}
+      {sentences.length > 0 && (
+        <div>
+          <div style={{ marginBottom: '15px' }}>
+            <button
+              onClick={handleSummarize}
+              disabled={isSummarizing}
+              style={{ padding: '8px 16px', cursor: isSummarizing ? 'not-allowed' : 'pointer' }}
+            >
+              {isSummarizing ? '요약 생성 중...' : '내용 요약하기'}
+            </button>
+            <span style={{ marginLeft: '12px', fontSize: '14px', color: '#555' }}>
+              {summaryStatus}
+            </span>
+          </div>
+
+          {summary.length > 0 && (
+            <div
+              style={{
+                border: '1px solid #0056b3',
+                backgroundColor: '#f8fbff',
+                borderRadius: '6px',
+                padding: '15px',
+              }}
+            >
+              <strong style={{ display: 'block', marginBottom: '10px', color: '#0056b3' }}>
+                AI 생성 요약 (3문장 이내)
+              </strong>
+              {summary.map((item, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    marginBottom: idx === summary.length - 1 ? '0' : '8px',
+                    color: '#222',
+                    lineHeight: '1.6',
+                  }}
+                >
+                  • {item}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -37,19 +37,7 @@ export default function App() {
     return audioBuffer.getChannelData(0);
   };
 
-  // 3. 영문 문장을 한글로 번역하는 보조 함수
-  const translateToKorean = async (text) => {
-    try {
-      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t&q=${encodeURIComponent(text)}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      return data[0].map((item) => item[0]).join('');
-    } catch (e) {
-      return '번역 불러오기 실패';
-    }
-  };
-
-  // 4. 로컬 Whisper 구동 (영문 구간별 추출 후 문장별 한글 매칭)
+  // 3. 로컬 Whisper 구동 (영문 문장 단위 추출)
   const handleTranscribe = async () => {
     if (!audioFile || isProcessing) return;
 
@@ -60,7 +48,7 @@ export default function App() {
       setStatus('Whisper 로컬 모델 로딩 중... (최초 1회 다운로드 후 캐시됨)');
       const transcriber = await pipeline(
         'automatic-speech-recognition',
-        'Xenova/whisper-base'
+        'Xenova/whisper-base.en'
       );
 
       setStatus('오디오 데이터 변환 중...');
@@ -68,30 +56,18 @@ export default function App() {
 
       setStatus('영문 스크립트 추출 중...');
       const output = await transcriber(audioData, {
-        language: 'english',
-        task: 'transcribe',
         chunk_length_s: 30,
         stride_length_s: 5,
-        return_timestamps: true, // 문장(구간) 단위로 쪼개기 위해 활성화
+        return_timestamps: true, // 문장(구간) 단위로 분리
       });
 
-      // Whisper가 나눈 구간(chunks)을 문장 배열로 정리
-      const rawChunks = output.chunks && output.chunks.length > 0
-        ? output.chunks.map((c) => c.text.trim()).filter(Boolean)
-        : output.text.match(/[^.!?]+[.!?]+/g) || [output.text];
+      // 추출된 구간(chunks)이나 전체 텍스트를 한 문장씩 배열로 분리
+      const extractedSentences =
+        output.chunks && output.chunks.length > 0
+          ? output.chunks.map((c) => c.text.trim()).filter(Boolean)
+          : output.text.match(/[^.!?]+[.!?]+/g)?.map((s) => s.trim()) || [output.text];
 
-      setStatus('한글 해석 생성 중...');
-      const results = [];
-
-      for (let i = 0; i < rawChunks.length; i++) {
-        const enText = rawChunks[i];
-        setStatus(`한글 해석 생성 중... (${i + 1} / ${rawChunks.length})`);
-        const koText = await translateToKorean(enText);
-        results.push({ en: enText, ko: koText });
-        // 번역되는 대로 화면에 한 문장씩 실시간 추가
-        setSentences([...results]);
-      }
-
+      setSentences(extractedSentences);
       setStatus('완료');
     } catch (error) {
       console.error(error);
@@ -103,7 +79,7 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: '600px', margin: '40px auto', padding: '20px', fontFamily: 'sans-serif' }}>
-      <h2>M4A 플레이어 & 영/한 스크립트 추출</h2>
+      <h2>M4A 플레이어 & 영문 스크립트 추출</h2>
 
       {/* 파일 업로드 */}
       <div style={{ marginBottom: '20px' }}>
@@ -137,24 +113,21 @@ export default function App() {
         </div>
       )}
 
-      {/* 영문 원문 & 한글 해석 한 문장씩 출력 */}
+      {/* 영문 스크립트 한 문장씩 출력 */}
       {sentences.length > 0 && (
         <div style={{ border: '1px solid #ccc', borderRadius: '6px', padding: '15px' }}>
-          {sentences.map((item, index) => (
+          {sentences.map((sentence, index) => (
             <div
               key={index}
               style={{
-                marginBottom: index === sentences.length - 1 ? '0' : '16px',
-                paddingBottom: index === sentences.length - 1 ? '0' : '16px',
+                marginBottom: index === sentences.length - 1 ? '0' : '12px',
+                paddingBottom: index === sentences.length - 1 ? '0' : '12px',
                 borderBottom: index === sentences.length - 1 ? 'none' : '1px solid #eee',
+                color: '#111',
+                lineHeight: '1.6',
               }}
             >
-              <div style={{ fontWeight: '600', color: '#111', marginBottom: '6px', lineHeight: '1.5' }}>
-                {item.en}
-              </div>
-              <div style={{ color: '#0056b3', fontSize: '15px', lineHeight: '1.5' }}>
-                {item.ko}
-              </div>
+              {sentence}
             </div>
           ))}
         </div>

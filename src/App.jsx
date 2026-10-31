@@ -79,7 +79,7 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: '600px', margin: '40px auto', padding: '20px', fontFamily: 'sans-serif' }}>
-      <h2>M4A 플레이어 & 영문 스크립트 추출</h2>
+      <h2>M4A 오디오 파일 영어 스크립트 추출 앱</h2>
 
       {/* 파일 업로드 */}
       <div style={{ marginBottom: '20px' }}>

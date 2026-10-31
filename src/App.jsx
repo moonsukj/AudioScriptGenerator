@@ -1,4 +1,3 @@
-JavaScript
 import React, { useState } from 'react';
 import { pipeline, env } from '@xenova/transformers';
 
